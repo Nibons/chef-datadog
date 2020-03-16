@@ -8,17 +8,19 @@ platforms:
 # Loop through two lists and output a total matrix of all possible platform + chef versions
 # fedora-20 needs kitchen-docker 1.7.0, but other bugs prevent that version from being used.
 <% test_platforms = %w(
-      ubuntu-14.04
       ubuntu-12.04
-      centos-6.6
+      ubuntu-14.04
+      ubuntu-16.04
       centos-5.11
+      centos-6.6
       centos-7.1
-      debian-7.7
+      debian-7.8
     )
     chef_versions = %w(
-      13
-      12.2.1
-      11.18.6
+      12.7.2
+      13.11.3
+      14
+      15
     )
 
     test_platforms.product(chef_versions).each do |platform_version, chef_version|
@@ -26,15 +28,16 @@ platforms:
 
 - name: <%= platform_version %>-<%= chef_version %>
   driver_config:
-    box: opscode_<%= platform_version %>_chef-provisionerless
-    box_url: http://opscode-vm-bento.s3.amazonaws.com/vagrant/virtualbox/opscode_<%= platform_version %>_chef-provisionerless.box
+    box: bento/<%= platform_version %>
     require_chef_omnibus: <%= chef_version %>
 <% end
 
 windows_platform = 'windows-2012r2'
 windows_chef_versions = %w(
-  13
-  12.2.1
+  12.7.2
+  13.11.3
+  14
+  15
 )
 
 windows_chef_versions.each do |chef_version|
@@ -67,6 +70,25 @@ suites:
     datadog: &DATADOG
       api_key: somenonnullapikeythats32charlong
       application_key: alsonotnil
+
+- name: system-probe
+  run_list:
+    - recipe[datadog::dd-agent]
+  attributes:
+    datadog: &DATADOG
+      aptrepo: 'http://apt.datad0g.com'
+      aptrepo_dist: 'beta'
+      # agent_version: '1:6.11.3~rc.2-1'
+      agent_package_action: 'install'
+      agent_allow_downgrade: true
+      api_key: somenonnullapikeythats32charlong
+      application_key: alsonotnil
+      system_probe:
+        enabled: true
+        sysprobe_socket: /opt/datadog-agent/run/sysprobe.sock
+        debug_port: 7654
+        bpf_debug: true
+        enable_conntrack: true
 
 - name: dd-handler
   run_list:
@@ -224,6 +246,7 @@ suites:
             password: somepass
             is_external: false
             pshard_stats: true
+            index_stats: true
             shard_level_metrics: true
             tags:
               - kitchen
@@ -397,19 +420,36 @@ suites:
               my_consumer:
                 my_topic: [0, 1, 4, 12]
 
-- name: datadog_mesos
+- name: datadog_mesos_master
   run_list:
-    - recipe[datadog::mesos]
+    - recipe[datadog::mesos_master]
   excludes: *WINDOWS_PLATFORMS
   attributes:
     datadog:
       <<: *DATADOG
-      mesos:
+      mesos_master:
         instances:
           - url: localhost:5050
             timeout: 8
             tags:
-              - toto
+              - master
+              - tata
+        init_config:
+          default_timeout: 10
+
+- name: datadog_mesos_slave
+  run_list:
+    - recipe[datadog::mesos_slave]
+  excludes: *WINDOWS_PLATFORMS
+  attributes:
+    datadog:
+      <<: *DATADOG
+      mesos_slave:
+        instances:
+          - url: localhost:5050
+            timeout: 8
+            tags:
+              - slave
               - tata
         init_config:
           default_timeout: 10
@@ -548,3 +588,28 @@ suites:
           - bounce
           tags:
           - test
+
+- name: datadog_vault
+  run_list:
+    - recipe[datadog::vault]
+  attributes:
+    datadog:
+      <<: *DATADOG
+      vault:
+        instances:
+          - api_url: http://localhost:8200/v1
+            detect_leader: false
+            skip_proxy: false
+            ssl_verify: true
+            ssl_ca_cert: /path/to/cert.crt
+            tags: ['_default']
+            timeout: 20
+
+# Integrations test of the datadog_integration resource
+- name: dd_integration_resource
+  run_list:
+    - recipe[datadog::dd-agent]
+    - recipe[test::dd_integration_resource]
+  attributes:
+    datadog:
+      <<: *DATADOG
